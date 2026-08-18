@@ -674,6 +674,8 @@ def init_bold_fit_wf(
             omp_nthreads=omp_nthreads,
             mem_gb=mem_gb['resampled'],
             sloppy=config.execution.sloppy,
+            mri_coreg_args=config.workflow.bold2anat_mri_coreg_args,
+            bbregister_args=config.workflow.bold2anat_bbregister_args,
         )
 
         ds_boldreg_wf = init_ds_registration_wf(

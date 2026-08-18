@@ -519,6 +519,13 @@ transform will be compared to the initial transform found by FLIRT.
 Excessive deviation will result in rejecting the BBR refinement and accepting the
 original, affine registration.
 
+For advanced use cases for example, limited field-of-view acquisitions where the
+default coregistration behaves poorly the ``--bold2anat-mri-coreg-args`` and
+``--bold2anat-bbregister-args`` command-line options allow custom arguments to be
+passed directly to FreeSurfer's ``mri_coreg`` and ``bbregister``, respectively
+(e.g. ``--bold2anat-mri-coreg-args="--regheader"`` or
+``--bold2anat-bbregister-args="--no-pass1"``).
+
 Resampling BOLD runs onto standard spaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 :py:func:`~fmriprep.workflows.bold.apply.init_bold_volumetric_resample_wf`

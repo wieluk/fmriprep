@@ -574,6 +574,10 @@ class workflow(_Config):
     """Method of initial BOLD to anatomical coregistration. If `auto`, a T2w image is used
     if available, otherwise the T1w image. `t1w` forces use of the T1w, `t2w` forces use of
     the T2w, and `header` uses the BOLD header information without an initial registration."""
+    bold2anat_mri_coreg_args = None
+    """Additional, custom arguments (as a string) to pass to FreeSurfer's ``mri_coreg``."""
+    bold2anat_bbregister_args = None
+    """Additional, custom arguments (as a string) to pass to FreeSurfer's ``bbregister``."""
     cifti_output = None
     """Generate HCP Grayordinates, accepts either ``'91k'`` (default) or ``'170k'``."""
     dummy_scans = None

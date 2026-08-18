@@ -427,6 +427,22 @@ https://fmriprep.readthedocs.io/en/{currentv.base_version if is_release else 'la
         '6 degrees (rotation and translation) are used by default.',
     )
     g_conf.add_argument(
+        '--bold2anat-mri-coreg-args',
+        action='store',
+        default=None,
+        help='Additional, custom arguments to pass to FreeSurfer `mri_coreg` during BOLD-to-'
+        'anatomical registration (e.g., `--bold2anat-mri-coreg-args="--regheader"`). '
+        'Advanced use only.',
+    )
+    g_conf.add_argument(
+        '--bold2anat-bbregister-args',
+        action='store',
+        default=None,
+        help='Additional, custom arguments to pass to FreeSurfer `bbregister` during BOLD-to-'
+        'anatomical registration (e.g., `--bold2anat-bbregister-args="--no-pass1"`). '
+        'Advanced use only.',
+    )
+    g_conf.add_argument(
         '--force-bbr',
         action=DeprecatedAction,
         help='Deprecated - use `--force bbr` instead.',
