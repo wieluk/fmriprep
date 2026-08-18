@@ -92,6 +92,46 @@ def get_sbrefs(
     )
 
 
+def get_coreg_intermediate(bold_file: str, layout: bids.BIDSLayout) -> str | None:
+    """Find a whole-head image to use as a ``bbregister --int`` intermediate volume.
+
+    ``bbregister --int`` composes BOLD-to-intermediate from the image headers, so the
+    intermediate is only valid if it shares a scanner coordinate frame with the BOLD
+    reference. We therefore restrict the search to the same session, and return nothing
+    for single-session datasets, where the anatomical template already covers the BOLD.
+
+    Parameters
+    ----------
+    bold_file
+        Absolute path to a BOLD file
+    layout
+        :class:`~bids.layout.BIDSLayout` to query
+
+    Returns
+    -------
+    Absolute path to a same-session anatomical, or ``None`` if there is no such image.
+    """
+    entities = extract_entities(bold_file)
+    session = entities.get('session')
+    if session is None:
+        return None
+
+    for suffix in ('T1w', 'T2w'):
+        candidates = sorted(
+            layout.get(
+                return_type='file',
+                subject=entities['subject'],
+                session=session,
+                datatype='anat',
+                suffix=suffix,
+                extension=['.nii', '.nii.gz'],
+            )
+        )
+        if candidates:
+            return candidates[0]
+    return None
+
+
 def init_bold_fit_wf(
     *,
     bold_series: list[str],
@@ -665,6 +705,22 @@ def init_bold_fit_wf(
             if 'no-bbr' in config.workflow.force
             else None
         )
+        intermediate = None
+        if config.workflow.bold2anat_intermediate == 'session':
+            if not config.workflow.run_reconall:
+                config.loggers.workflow.warning(
+                    'Intermediate-volume coregistration requires FreeSurfer; ignoring '
+                    '--bold2anat-intermediate.'
+                )
+            else:
+                intermediate = get_coreg_intermediate(bold_file, layout)
+                if intermediate is None:
+                    config.loggers.workflow.warning(
+                        'No same-session anatomical found to use as a coregistration '
+                        'intermediate for %s; falling back to direct initialization.',
+                        bold_file,
+                    )
+
         # calculate BOLD registration to T1w
         bold_reg_wf = init_bold_reg_wf(
             bold2anat_dof=config.workflow.bold2anat_dof,
@@ -674,7 +730,13 @@ def init_bold_fit_wf(
             omp_nthreads=omp_nthreads,
             mem_gb=mem_gb['resampled'],
             sloppy=config.execution.sloppy,
+            use_intermediate=intermediate is not None,
+            bbr_hemi=config.workflow.bbr_hemi,
+            coreg_regheader=config.workflow.coreg_regheader,
+            coreg_no_brute_force=config.workflow.coreg_no_brute_force,
         )
+        if intermediate is not None:
+            bold_reg_wf.inputs.inputnode.intermediate = intermediate
 
         ds_boldreg_wf = init_ds_registration_wf(
             source_file=bold_file,

@@ -418,6 +418,17 @@ https://fmriprep.readthedocs.io/en/{currentv.base_version if is_release else 'la
         'the T2w, and `header` uses the BOLD header information without an initial registration.',
     )
     g_conf.add_argument(
+        '--bold2anat-intermediate',
+        choices=['none', 'session'],
+        default='none',
+        help='Bootstrap BOLD-to-anatomical coregistration through a whole-head intermediate '
+        'image (`bbregister --int`). Intended for partial field-of-view BOLD, especially in '
+        'multi-session datasets where the anatomical template is dominated by another session. '
+        'If `session`, a same-session anatomical (T1w, else T2w) is used as the intermediate '
+        'where one exists. Requires FreeSurfer, and disables the affine fallback for the runs '
+        'it applies to.',
+    )
+    g_conf.add_argument(
         '--bold2anat-dof',
         action='store',
         default=6,
@@ -425,6 +436,31 @@ https://fmriprep.readthedocs.io/en/{currentv.base_version if is_release else 'la
         type=int,
         help='Degrees of freedom when registering BOLD to anatomical images. '
         '6 degrees (rotation and translation) are used by default.',
+    )
+    g_conf.add_argument(
+        '--bbr-hemi',
+        choices=['both', 'lh', 'rh'],
+        default='both',
+        help='Which hemisphere(s) bbregister should optimize against. '
+        'Use `lh` or `rh` for partial field-of-view BOLD that covers only one '
+        'hemisphere, to prevent the missing hemisphere from corrupting the '
+        'cost function. Default: both.',
+    )
+    g_conf.add_argument(
+        '--coreg-regheader',
+        action='store_true',
+        default=False,
+        help='Pass --regheader (--no-cras0) to mri_coreg, initializing from the '
+        'image header geometry instead of aligning centers of mass. Useful when '
+        'BOLD headers have been pre-aligned to the anatomical space.',
+    )
+    g_conf.add_argument(
+        '--coreg-no-brute-force',
+        action='store_true',
+        default=False,
+        help='Pass --no-bf to mri_coreg, disabling the brute-force search. '
+        'Useful when images are already approximately aligned (e.g. after '
+        'header pre-alignment) and a broad search might overshoot.',
     )
     g_conf.add_argument(
         '--force-bbr',

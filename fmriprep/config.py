@@ -574,6 +574,22 @@ class workflow(_Config):
     """Method of initial BOLD to anatomical coregistration. If `auto`, a T2w image is used
     if available, otherwise the T1w image. `t1w` forces use of the T1w, `t2w` forces use of
     the T2w, and `header` uses the BOLD header information without an initial registration."""
+    bold2anat_intermediate = 'none'
+    """Bootstrap BOLD-to-anatomical coregistration through a whole-head intermediate image
+    (``bbregister --int``), for partial field-of-view BOLD. If `session`, a same-session
+    anatomical (T1w, else T2w) is used where one exists. If `none` (default), no
+    intermediate is used."""
+    bbr_hemi = 'both'
+    """Which hemisphere(s) bbregister should optimize against (``both``, ``lh``, ``rh``).
+    For partial FoV BOLD covering only one hemisphere, restricting to that hemisphere
+    prevents the missing side from corrupting the boundary-based cost function."""
+    coreg_regheader = False
+    """Pass ``--regheader`` (``--no-cras0``) to ``mri_coreg``, initializing from the
+    image header geometry rather than aligning centers of mass. Useful after
+    pre-aligning BOLD headers to the anatomical space."""
+    coreg_no_brute_force = False
+    """Pass ``--no-bf`` to ``mri_coreg``, disabling the brute-force search.
+    Useful when images are already approximately aligned."""
     cifti_output = None
     """Generate HCP Grayordinates, accepts either ``'91k'`` (default) or ``'170k'``."""
     dummy_scans = None

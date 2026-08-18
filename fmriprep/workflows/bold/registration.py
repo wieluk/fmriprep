@@ -56,6 +56,10 @@ def init_bold_reg_wf(
     bold2anat_init: RegistrationInit,
     mem_gb: float,
     omp_nthreads: int,
+    use_intermediate: bool = False,
+    bbr_hemi: str = 'both',
+    coreg_regheader: bool = False,
+    coreg_no_brute_force: bool = False,
     name: str = 'bold_reg_wf',
     sloppy: bool = False,
 ):
@@ -100,6 +104,10 @@ def init_bold_reg_wf(
         Size of BOLD file in GB
     omp_nthreads : :obj:`int`
         Maximum number of threads an individual process may use
+    use_intermediate : :obj:`bool`
+        Route the initial co-registration through a whole-head intermediate image
+        supplied on the ``intermediate`` input (``bbregister --int``).
+        Only supported with FreeSurfer.
     name : :obj:`str`
         Name of workflow (default: ``bold_reg_wf``)
 
@@ -108,6 +116,10 @@ def init_bold_reg_wf(
     ref_bold_brain
         Reference image to which BOLD series is aligned
         If ``fieldwarp == True``, ``ref_bold_brain`` should be unwarped
+    intermediate
+        Whole-head image sharing a scanner coordinate frame with ``ref_bold_brain``
+        (i.e., acquired in the same session), used to bootstrap the initial
+        co-registration. Only used if ``use_intermediate`` is ``True``.
     t1w_brain
         Skull-stripped ``t1w_preproc``
     t1w_dseg
@@ -144,6 +156,7 @@ def init_bold_reg_wf(
         niu.IdentityInterface(
             fields=[
                 'ref_bold_brain',
+                'intermediate',
                 't1w_preproc',
                 't1w_mask',
                 't1w_dseg',
@@ -166,6 +179,10 @@ def init_bold_reg_wf(
             bold2anat_dof=bold2anat_dof,
             bold2anat_init=bold2anat_init,
             omp_nthreads=omp_nthreads,
+            use_intermediate=use_intermediate,
+            bbr_hemi=bbr_hemi,
+            coreg_regheader=coreg_regheader,
+            coreg_no_brute_force=coreg_no_brute_force,
         )
     else:
         bbr_wf = init_fsl_bbr_wf(
@@ -174,11 +191,13 @@ def init_bold_reg_wf(
             bold2anat_init=bold2anat_init,
             sloppy=sloppy,
             omp_nthreads=omp_nthreads,
+            use_intermediate=use_intermediate,
         )
 
     workflow.connect([
         (inputnode, bbr_wf, [
             ('ref_bold_brain', 'inputnode.in_file'),
+            ('intermediate', 'inputnode.intermediate'),
             ('fsnative2t1w_xfm', 'inputnode.fsnative2t1w_xfm'),
             ('subjects_dir', 'inputnode.subjects_dir'),
             ('subject_id', 'inputnode.subject_id'),
@@ -202,6 +221,10 @@ def init_bbreg_wf(
     bold2anat_dof: AffineDOF,
     bold2anat_init: RegistrationInit,
     omp_nthreads: int,
+    use_intermediate: bool = False,
+    bbr_hemi: str = 'both',
+    coreg_regheader: bool = False,
+    coreg_no_brute_force: bool = False,
     name: str = 'bbreg_wf',
 ):
     """
@@ -243,13 +266,39 @@ def init_bbreg_wf(
         If ``'header'``, use header information for initialization of BOLD and T1 images.
         If ``'t1w'``, align BOLD to T1w by their centers.
         If ``'t2w'``, align BOLD to T1w using the T2w as an intermediate.
+    use_intermediate : :obj:`bool`
+        Bootstrap the initial registration through the whole-head image passed on the
+        ``intermediate`` input, using ``bbregister --int``.
+        See the note on intermediate volumes below.
     name : :obj:`str`, optional
         Workflow name (default: bbreg_wf)
+
+    Notes
+    -----
+    ``bbregister --int`` targets the partial field-of-view (FoV) case: instead of
+    initializing directly from the (partial-FoV) BOLD reference, ``mri_coreg`` is run on
+    the whole-head intermediate, and the BOLD-to-intermediate mapping is taken from the
+    image headers. The two are concatenated to seed BBR. Two consequences matter:
+
+    1. The intermediate **must share a scanner coordinate frame with the BOLD reference**
+       — in practice, it must come from the same session. The BOLD-to-intermediate step is
+       header-based only (``tkregister2 --int``); it is never optimized.
+    2. ``--int`` only affects *initialization*. Both ``mri_segreg`` passes still optimize
+       the BOLD reference against the surfaces directly, so an intermediate cannot rescue a
+       BBR that diverges from an already-good starting point.
+
+    ``bbregister`` ignores ``--int`` entirely when ``--init-reg`` is supplied, so this path
+    drops fMRIPrep's own ``mri_coreg`` node and lets ``bbregister`` initialize itself
+    (``--init-coreg``). With no independent affine registration to compare against, BBR
+    cannot be rejected, so ``use_bbr`` is forced to ``True``.
 
     Inputs
     ------
     in_file
         Reference BOLD image to be registered
+    intermediate
+        Whole-head image from the same session as ``in_file``, used as the
+        ``bbregister --int`` intermediate volume. Only used if ``use_intermediate``.
     fsnative2t1w_xfm
         FSL-style affine matrix translating from FreeSurfer T1.mgz to T1w
     subjects_dir
@@ -293,14 +342,20 @@ The BOLD reference was then co-registered to the T1w reference using
 Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
 """
 
-    use_t2w = bold2anat_init == 't2w'
+    use_t2w = bold2anat_init == 't2w' and not use_intermediate
     if use_t2w:
         workflow.__desc__ += ' The aligned T2w image was used for initial co-registration.'
+    if use_intermediate:
+        workflow.__desc__ += (
+            ' A whole-head image acquired in the same session was supplied as an '
+            'intermediate volume (`bbregister --int`) to initialize co-registration.'
+        )
 
     inputnode = pe.Node(
         niu.IdentityInterface(
             [
                 'in_file',
+                'intermediate',
                 'fsnative2t1w_xfm',  # BBRegister
                 'subjects_dir',
                 'subject_id',
@@ -322,11 +377,27 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     # For now make BBR unconditional - in the future, we can fall back to identity,
     # but adding the flexibility without testing seems a bit dangerous
     if bold2anat_init == 'header':
+        if use_intermediate:
+            # --int with --init-header would resolve both legs of the chain from headers,
+            # which is just header registration with extra steps
+            raise ValueError('Cannot use an intermediate volume with header registration')
         if use_bbr is False:
             raise ValueError('Cannot disable BBR and use header registration')
         if use_bbr is None:
             LOGGER.warning('Initializing BBR with header; affine fallback disabled')
             use_bbr = True
+
+    if use_intermediate:
+        if use_bbr is False:
+            # The intermediate only ever feeds bbregister's initialization
+            raise ValueError('Cannot disable BBR and use an intermediate volume')
+        if use_bbr is None:
+            LOGGER.warning('Initializing BBR with an intermediate; affine fallback disabled')
+            use_bbr = True
+        if bold2anat_init == 't2w':
+            LOGGER.warning(
+                'T2w initialization is superseded by the intermediate volume; ignoring.'
+            )
 
     fssource = pe.Node(FreeSurferSource(), name='fssource')
 
@@ -338,20 +409,42 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     )
     if use_t2w:
         mri_coreg.inputs.reference_mask = False
+    if coreg_regheader:
+        mri_coreg.inputs.no_cras0 = True
+        LOGGER.info('mri_coreg: using --regheader (--no-cras0) initialization')
+    if coreg_no_brute_force:
+        mri_coreg.inputs.no_brute_force = True
+        LOGGER.info('mri_coreg: brute-force search disabled (--no-bf)')
+
+    bbregister_args = ''
+    if bbr_hemi == 'lh':
+        bbregister_args = '--lh-only'
+        LOGGER.info('bbregister: restricting optimization to left hemisphere')
+    elif bbr_hemi == 'rh':
+        bbregister_args = '--rh-only'
+        LOGGER.info('bbregister: restricting optimization to right hemisphere')
+
+    bbregister_kwargs = dict(
+        dof=bold2anat_dof,
+        contrast_type='t2',
+        out_lta_file=True,
+        # Bug in nipype prevents using init_cost_file=True
+        init_cost_file='bbregister.initcost',
+    )
+    if bbregister_args:
+        bbregister_kwargs['args'] = bbregister_args
 
     bbregister = pe.Node(
-        BBRegister(
-            dof=bold2anat_dof,
-            contrast_type='t2',
-            out_lta_file=True,
-            # Bug in nipype prevents using init_cost_file=True
-            init_cost_file='bbregister.initcost',
-        ),
+        BBRegister(**bbregister_kwargs),
         name='bbregister',
         mem_gb=12,
     )
     if bold2anat_init == 'header':
         bbregister.inputs.init = 'header'
+    elif use_intermediate:
+        # bbregister silently ignores --int when --init-reg is given, so it must run
+        # mri_coreg itself -- on the intermediate rather than the partial-FoV reference
+        bbregister.inputs.init = 'coreg'
 
     transforms = pe.Node(niu.Merge(2), run_without_submitting=True, name='transforms')
     # In cases where Merge(2) only has `in1` or `in2` defined
@@ -383,8 +476,11 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
         (merge_meta, outputnode, [('out_dict', 'metadata')]),
     ])  # fmt:skip
 
-    # Do not initialize with header, use mri_coreg
-    if bold2anat_init != 'header':
+    if use_intermediate:
+        workflow.connect(inputnode, 'intermediate', bbregister, 'intermediate_file')
+
+    # Do not initialize with header or an intermediate, use our own mri_coreg
+    if bold2anat_init != 'header' and not use_intermediate:
         gen_by.inputs.in2 = {
             'GeneratedBy': [
                 {'Name': 'mri_coreg', 'Version': mri_coreg.interface.version or '<unknown>'}
@@ -467,6 +563,7 @@ def init_fsl_bbr_wf(
     bold2anat_init: RegistrationInit,
     omp_nthreads: int,
     sloppy: bool = False,
+    use_intermediate: bool = False,
     name: str = 'fsl_bbr_wf',
 ):
     """
@@ -521,6 +618,8 @@ def init_fsl_bbr_wf(
         Brain mask of structural image
     t1w_dseg
         FAST segmentation of masked ``t1w_preproc``
+    intermediate
+        Unused (see :py:func:`~fmriprep.workflows.bold.registration.init_bbreg_wf`)
     fsnative2t1w_xfm
         Unused (see :py:func:`~fmriprep.workflows.bold.registration.init_bbreg_wf`)
     subjects_dir
@@ -563,6 +662,7 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
         niu.IdentityInterface(
             [
                 'in_file',
+                'intermediate',  # Unused (see init_bbreg_wf)
                 'fsnative2t1w_xfm',  # BBRegister
                 'subjects_dir',
                 'subject_id',
@@ -586,6 +686,8 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
 
     if bold2anat_init == 'header':
         raise NotImplementedError('Header-based registration initialization not supported for FSL')
+    if use_intermediate:
+        raise NotImplementedError('Intermediate volumes are not supported for FSL')
     if bold2anat_init == 't2w':
         LOGGER.warning(
             'T2w intermediate for FSL is not implemented, registering with T1w instead.'

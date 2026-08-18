@@ -96,6 +96,7 @@ all = ["fmriprep[doc,maint,telemetry,test]"]
 
 [project.scripts]
 fmriprep = "fmriprep.cli.run:main"
+fmriprep-prealign = "fmriprep.cli.prealign:main"
 
 #
 # Hatch configurations
