@@ -332,3 +332,35 @@ def test_reuse_config(tmp_path):
     for v in ('execution.run_uuid', 'execution.fmriprep_dir'):
         assert reused_config[v] != overridden_config[v]
     _reset_config()
+
+
+@pytest.mark.parametrize(
+    ('extra_args', 'error'),
+    [
+        ([], None),
+        (['--bold2anat-init', 'header'], '`--bold2anat-init header`'),
+        (['--bold-coreg-level', 'subject'], '`--bold-coreg-level subject`'),
+    ],
+)
+def test_bold2anat_intermediate(tmp_path, minimal_bids, capsys, extra_args, error):
+    args = [
+        str(minimal_bids),
+        str(tmp_path / 'out'),
+        'participant',
+        '-w',
+        str(tmp_path / 'work'),
+        '--skip-bids-validation',
+        '--bold2anat-intermediate',
+        'session',
+        *extra_args,
+    ]
+    try:
+        if error is None:
+            parse_args(args=args)
+            assert config.workflow.bold2anat_intermediate == 'session'
+        else:
+            with pytest.raises(SystemExit):
+                parse_args(args=args)
+            assert error in capsys.readouterr().err
+    finally:
+        _reset_config()

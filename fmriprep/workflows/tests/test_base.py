@@ -5,6 +5,7 @@ import bids
 import nibabel as nb
 import numpy as np
 import pytest
+from nipype.interfaces.base import isdefined
 from nipype.pipeline.engine.utils import generate_expanded_graph
 from niworkflows.utils.testing import generate_bids_skeleton
 from sdcflows.fieldmaps import clear_registry
@@ -390,3 +391,25 @@ def test_fmriprep_wf_heterogeneous_sessions(bids_root_factory):
         assert procs == [('01', None)]
         wf = init_fmriprep_wf()
         assert wf.get_node('sub_01_wf')
+
+
+@pytest.mark.parametrize('bold_coreg_level', ['run', 'session'])
+def test_fmriprep_wf_bold2anat_intermediate(bids_root_factory, bold_coreg_level):
+    bids_dir = bids_root_factory('homogeneous_sessions')
+    with mock_config(bids_dir=bids_dir):
+        config.workflow.bold2anat_intermediate = 'session'
+        config.workflow.bold_coreg_level = bold_coreg_level
+        config._create_processing_groups()
+        wf = init_fmriprep_wf()
+
+    nodes = wf._get_all_nodes()
+    assert any(node.name == 'retarget_lta' for node in nodes)
+    intermediates = {
+        node.inputs.intermediate
+        for node in nodes
+        if node.name == 'inputnode'
+        and 'intermediate' in node.inputs.copyable_trait_names()
+        and isdefined(node.inputs.intermediate)
+    }
+    assert sorted(Path(fname).parts[-3] for fname in intermediates) == ['ses-post', 'ses-pre']
+    assert all(fname.endswith('_T1w.nii.gz') for fname in intermediates)

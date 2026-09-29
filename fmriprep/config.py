@@ -574,6 +574,13 @@ class workflow(_Config):
     """Method of initial BOLD to anatomical coregistration. If `auto`, a T2w image is used
     if available, otherwise the T1w image. `t1w` forces use of the T1w, `t2w` forces use of
     the T2w, and `header` uses the BOLD header information without an initial registration."""
+    bold2anat_intermediate = 'none'
+    """Initialize BOLD-to-anatomical coregistration from a same-session anatomical
+    (``'session'``) or not (``'none'``)."""
+    bold2anat_mri_coreg_args = None
+    """Extra arguments for FreeSurfer's ``mri_coreg``."""
+    bold2anat_bbregister_args = None
+    """Extra arguments for FreeSurfer's ``bbregister``."""
     bold_coreg_level = 'run'
     """Level at which BOLD runs are combined before coregistration to the
     anatomical reference. One of ``'run'`` (default), ``'session'``, or
