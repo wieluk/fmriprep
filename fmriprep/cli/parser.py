@@ -418,6 +418,14 @@ https://fmriprep.readthedocs.io/en/{currentv.base_version if is_release else 'la
         'the T2w, and `header` uses the BOLD header information without an initial registration.',
     )
     g_conf.add_argument(
+        '--bold2anat-intermediate',
+        choices=['none', 'session'],
+        default='none',
+        help='Initialize BOLD-to-anatomical coregistration from a whole-head intermediate '
+        'image (like `bbregister --int`), for partial field-of-view BOLD. `session` uses a '
+        'T1w (else T2w) from the same session, related to the BOLD through the image headers.',
+    )
+    g_conf.add_argument(
         '--bold2anat-dof',
         action='store',
         default=6,
@@ -827,6 +835,16 @@ def parse_args(args=None, namespace=None):
             '`--subject-anatomical-reference unbiased` instead.'
         )
         config.loggers.cli.warning(msg)
+
+    if opts.bold2anat_intermediate != 'none':
+        if opts.bold2anat_init == 'header':
+            parser.error(
+                '`--bold2anat-intermediate` is incompatible with `--bold2anat-init header`.'
+            )
+        if opts.bold_coreg_level == 'subject':
+            parser.error(
+                '`--bold2anat-intermediate` is incompatible with `--bold-coreg-level subject`.'
+            )
 
     if opts.bold_coreg_level == 'subject' and opts.subject_anatomical_reference == 'sessionwise':
         parser.error(

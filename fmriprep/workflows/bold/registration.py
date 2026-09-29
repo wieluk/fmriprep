@@ -58,6 +58,7 @@ def init_bold_reg_wf(
     omp_nthreads: int,
     name: str = 'bold_reg_wf',
     sloppy: bool = False,
+    use_intermediate: bool = False,
     mri_coreg_args: str | None = None,
     bbregister_args: str | None = None,
 ):
@@ -104,6 +105,8 @@ def init_bold_reg_wf(
         Maximum number of threads an individual process may use
     name : :obj:`str`
         Name of workflow (default: ``bold_reg_wf``)
+    use_intermediate : :obj:`bool`
+        Initialize from the ``intermediate`` input (see :py:func:`init_bbreg_wf`).
     mri_coreg_args : :obj:`str` or None
         Extra arguments for FreeSurfer's ``mri_coreg``
     bbregister_args : :obj:`str` or None
@@ -114,6 +117,8 @@ def init_bold_reg_wf(
     ref_bold_brain
         Reference image to which BOLD series is aligned
         If ``fieldwarp == True``, ``ref_bold_brain`` should be unwarped
+    intermediate
+        Whole-head image from the same session as ``ref_bold_brain``
     t1w_brain
         Skull-stripped ``t1w_preproc``
     t1w_dseg
@@ -150,6 +155,7 @@ def init_bold_reg_wf(
         niu.IdentityInterface(
             fields=[
                 'ref_bold_brain',
+                'intermediate',
                 't1w_preproc',
                 't1w_mask',
                 't1w_dseg',
@@ -172,6 +178,7 @@ def init_bold_reg_wf(
             bold2anat_dof=bold2anat_dof,
             bold2anat_init=bold2anat_init,
             omp_nthreads=omp_nthreads,
+            use_intermediate=use_intermediate,
             mri_coreg_args=mri_coreg_args,
             bbregister_args=bbregister_args,
         )
@@ -184,12 +191,14 @@ def init_bold_reg_wf(
             bold2anat_init=bold2anat_init,
             sloppy=sloppy,
             omp_nthreads=omp_nthreads,
+            use_intermediate=use_intermediate,
             mri_coreg_args=mri_coreg_args,
         )
 
     workflow.connect([
         (inputnode, bbr_wf, [
             ('ref_bold_brain', 'inputnode.in_file'),
+            ('intermediate', 'inputnode.intermediate'),
             ('fsnative2t1w_xfm', 'inputnode.fsnative2t1w_xfm'),
             ('subjects_dir', 'inputnode.subjects_dir'),
             ('subject_id', 'inputnode.subject_id'),
@@ -214,6 +223,7 @@ def init_bbreg_wf(
     bold2anat_init: RegistrationInit,
     omp_nthreads: int,
     name: str = 'bbreg_wf',
+    use_intermediate: bool = False,
     mri_coreg_args: str | None = None,
     bbregister_args: str | None = None,
 ):
@@ -258,15 +268,26 @@ def init_bbreg_wf(
         If ``'t2w'``, align BOLD to T1w using the T2w as an intermediate.
     name : :obj:`str`, optional
         Workflow name (default: bbreg_wf)
+    use_intermediate : :obj:`bool`
+        Initialize from the ``intermediate`` input (see Notes).
     mri_coreg_args : :obj:`str` or None
         Extra arguments for FreeSurfer's ``mri_coreg``
     bbregister_args : :obj:`str` or None
         Extra arguments for FreeSurfer's ``bbregister``
 
+    Notes
+    -----
+    For partial field-of-view BOLD, ``mri_coreg`` can be run on a whole-head
+    ``intermediate`` image instead, and the BOLD reference is mapped onto it through
+    the image headers (as ``bbregister --int`` does). The intermediate must therefore
+    share a scanner coordinate frame with the BOLD reference (same session).
+
     Inputs
     ------
     in_file
         Reference BOLD image to be registered
+    intermediate
+        Whole-head image from the same session as ``in_file``
     fsnative2t1w_xfm
         FSL-style affine matrix translating from FreeSurfer T1.mgz to T1w
     subjects_dir
@@ -310,14 +331,22 @@ The BOLD reference was then co-registered to the T1w reference using
 Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
 """
 
-    use_t2w = bold2anat_init == 't2w'
+    if use_intermediate and bold2anat_init == 'header':
+        raise ValueError('Cannot use an intermediate volume with header registration')
+
+    use_t2w = bold2anat_init == 't2w' and not use_intermediate
     if use_t2w:
         workflow.__desc__ += ' The aligned T2w image was used for initial co-registration.'
+    if use_intermediate:
+        if bold2anat_init == 't2w':
+            LOGGER.info('T2w initialization is superseded by the intermediate volume')
+        workflow.__desc__ += _INTERMEDIATE_DESC
 
     inputnode = pe.Node(
         niu.IdentityInterface(
             [
                 'in_file',
+                'intermediate',
                 'fsnative2t1w_xfm',  # BBRegister
                 'subjects_dir',
                 'subject_id',
@@ -348,7 +377,9 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     fssource = pe.Node(FreeSurferSource(), name='fssource')
 
     mri_coreg = pe.Node(
-        MRICoreg(dof=bold2anat_dof, sep=[4], ftol=0.0001, linmintol=0.01),
+        MRICoreg(
+            dof=6 if use_intermediate else bold2anat_dof, sep=[4], ftol=0.0001, linmintol=0.01
+        ),
         name='mri_coreg',
         n_procs=omp_nthreads,
         mem_gb=5,
@@ -413,10 +444,10 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
         }
         workflow.connect([
             (inputnode, mri_coreg, [('subjects_dir', 'subjects_dir'),
-                                    ('subject_id', 'subject_id'),
-                                    ('in_file', 'source_file')]),
-            (mri_coreg, transforms, [('out_lta_file', 'in2')]),
+                                    ('subject_id', 'subject_id')]),
         ])  # fmt:skip
+        init_xfm = _connect_coreg_source(workflow, inputnode, mri_coreg, use_intermediate)
+        workflow.connect(*init_xfm, transforms, 'in2')
 
         if use_t2w:
             workflow.connect([
@@ -432,7 +463,7 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
             return workflow
 
         # Otherwise bbregister will also be used
-        workflow.connect(mri_coreg, 'out_lta_file', bbregister, 'init_reg_file')
+        workflow.connect(*init_xfm, bbregister, 'init_reg_file')
 
     # Use bbregister
     workflow.connect([
@@ -489,6 +520,7 @@ def init_fsl_bbr_wf(
     omp_nthreads: int,
     sloppy: bool = False,
     name: str = 'fsl_bbr_wf',
+    use_intermediate: bool = False,
     mri_coreg_args: str | None = None,
 ):
     """
@@ -532,6 +564,8 @@ def init_fsl_bbr_wf(
         If ``'t2w'``, align BOLD to T1w using the T2w as an intermediate.
     name : :obj:`str`, optional
         Workflow name (default: fsl_bbr_wf)
+    use_intermediate : :obj:`bool`
+        Initialize from the ``intermediate`` input (see :py:func:`init_bbreg_wf`).
     mri_coreg_args : :obj:`str` or None
         Extra arguments for FreeSurfer's ``mri_coreg``
 
@@ -539,6 +573,8 @@ def init_fsl_bbr_wf(
     ------
     in_file
         Reference BOLD image to be registered
+    intermediate
+        Whole-head image from the same session as ``in_file``
     t1w_preproc
         T1-weighted structural image
     t1w_mask
@@ -582,11 +618,14 @@ The BOLD reference was then co-registered to the T1w reference using
 with the boundary-based registration [@bbr] cost-function.
 Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
 """
+    if use_intermediate:
+        workflow.__desc__ += _INTERMEDIATE_DESC
 
     inputnode = pe.Node(
         niu.IdentityInterface(
             [
                 'in_file',
+                'intermediate',
                 'fsnative2t1w_xfm',  # BBRegister
                 'subjects_dir',
                 'subject_id',
@@ -610,7 +649,7 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
 
     if bold2anat_init == 'header':
         raise NotImplementedError('Header-based registration initialization not supported for FSL')
-    if bold2anat_init == 't2w':
+    if bold2anat_init == 't2w' and not use_intermediate:
         LOGGER.warning(
             'T2w intermediate for FSL is not implemented, registering with T1w instead.'
         )
@@ -622,7 +661,9 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     mask_t1w_brain = pe.Node(ApplyMask(), name='mask_t1w_brain')
 
     mri_coreg = pe.Node(
-        MRICoreg(dof=bold2anat_dof, sep=[4], ftol=0.0001, linmintol=0.01),
+        MRICoreg(
+            dof=6 if use_intermediate else bold2anat_dof, sep=[4], ftol=0.0001, linmintol=0.01
+        ),
         name='mri_coreg',
         n_procs=omp_nthreads,
         mem_gb=5,
@@ -647,7 +688,6 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
             ('t1w_preproc', 'in_file'),
             ('t1w_mask', 'in_mask'),
         ]),
-        (inputnode, mri_coreg, [('in_file', 'source_file')]),
         (inputnode, xfm2itk, [('in_file', 'moving')]),
         (mask_t1w_brain, mri_coreg, [('out_file', 'reference_file')]),
         (mask_t1w_brain, xfm2itk, [('out_file', 'reference')]),
@@ -660,10 +700,12 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
         (select_meta, outputnode, [('out', 'metadata')]),
     ])  # fmt:skip
 
+    init_xfm = _connect_coreg_source(workflow, inputnode, mri_coreg, use_intermediate)
+
     # Short-circuit workflow building, use rigid registration
     if use_bbr is False:
         xfm2itk.inputs.in_fmt = 'fs'  # Override
-        workflow.connect(mri_coreg, 'out_lta_file', xfm2itk, 'in_xfm')
+        workflow.connect(*init_xfm, xfm2itk, 'in_xfm')
 
         outputnode.inputs.fallback = True
 
@@ -691,9 +733,9 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     workflow.connect([
         (inputnode, wm_mask, [('t1w_dseg', 'in_seg')]),
         (inputnode, flt_bbr, [('in_file', 'in_file')]),
-        (mri_coreg, lta_to_fsl, [('out_lta_file', 'in_lta')]),
         (lta_to_fsl, flt_bbr, [('out_fsl', 'in_matrix_file')]),
     ])  # fmt:skip
+    workflow.connect(*init_xfm, lta_to_fsl, 'in_lta')
 
     if sloppy is True:
         downsample = pe.Node(
@@ -747,6 +789,51 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     ])  # fmt:skip
 
     return workflow
+
+
+_INTERMEDIATE_DESC = (
+    ' The initial co-registration was computed on a whole-head anatomical image from'
+    ' the same session (six degrees of freedom), onto which the BOLD reference was'
+    ' mapped using the image headers.'
+)
+
+
+def _connect_coreg_source(workflow, inputnode, mri_coreg, use_intermediate):
+    """Connect the ``mri_coreg`` source; return the (node, field) of the initial LTA."""
+    if not use_intermediate:
+        workflow.connect(inputnode, 'in_file', mri_coreg, 'source_file')
+        return mri_coreg, 'out_lta_file'
+
+    retarget_lta = pe.Node(
+        niu.Function(function=_retarget_lta),
+        name='retarget_lta',
+        mem_gb=DEFAULT_MEMORY_MIN_GB,
+    )
+    workflow.connect([
+        (inputnode, mri_coreg, [('intermediate', 'source_file')]),
+        (inputnode, retarget_lta, [('in_file', 'source_file')]),
+        (mri_coreg, retarget_lta, [('out_lta_file', 'in_lta')]),
+    ])  # fmt:skip
+    return retarget_lta, 'out'
+
+
+def _retarget_lta(in_lta, source_file):
+    """Replace the source geometry of an LTA, keeping its RAS-to-RAS mapping."""
+    from pathlib import Path
+
+    import nibabel as nb
+    from nitransforms.io.lta import FSLinearTransformArray, VolumeGeometry
+
+    lta = FSLinearTransformArray.from_filename(in_lta)
+    src = VolumeGeometry.from_image(nb.load(source_file))
+    for xfm in lta['xforms']:
+        xfm.set_type(1)
+        xfm.structarr['src'] = src.structarr
+    lta.structarr['type'] = 1
+
+    out_file = Path('retargeted.lta').absolute()
+    lta.to_filename(out_file)
+    return str(out_file)
 
 
 def compare_xforms(lta_list, norm_threshold=15):

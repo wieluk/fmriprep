@@ -190,7 +190,7 @@ def init_single_subject_wf(
     from fmriprep.utils.bids import is_valid_bold_template
     from fmriprep.utils.misc import get_wf_name
     from fmriprep.workflows.bold.base import init_bold_apply_wf
-    from fmriprep.workflows.bold.coreg import init_bold_anat_coreg_wf
+    from fmriprep.workflows.bold.coreg import get_coreg_intermediate, init_bold_anat_coreg_wf
     from fmriprep.workflows.bold.fit import init_bold_fit_wf
     from fmriprep.workflows.bold.outputs import init_func_fit_reports_wf
 
@@ -918,6 +918,25 @@ tasks and sessions), the following preprocessing was performed.
 
         coreg_precomputed = aggregate_coreg_precomputed(functional_caches, bold_coreg_level)
 
+        intermediates = None
+        if config.workflow.bold2anat_intermediate == 'session':
+            intermediates = [
+                get_coreg_intermediate(bold_file, config.execution.layout)
+                for bold_file in group_bold_files
+            ]
+            for bold_file, intermediate in zip(group_bold_files, intermediates, strict=True):
+                if intermediate is None:
+                    config.loggers.workflow.warning(
+                        'No same-session anatomical found for %s; not using an intermediate.',
+                        bold_file,
+                    )
+                else:
+                    config.loggers.workflow.info(
+                        'Using %s as coregistration intermediate for %s.',
+                        intermediate,
+                        bold_file,
+                    )
+
         bold_anat_coreg_wf = init_bold_anat_coreg_wf(
             bold_files=group_bold_files,
             coreg_space=bold_coreg_level,
@@ -931,6 +950,7 @@ tasks and sessions), the following preprocessing was performed.
             output_dir=fmriprep_dir,
             reference_anat='T1w',
             precomputed=coreg_precomputed,
+            intermediates=intermediates,
             mri_coreg_args=config.workflow.bold2anat_mri_coreg_args,
             bbregister_args=config.workflow.bold2anat_bbregister_args,
             name=f'bold_anat_coreg_{group_id}_wf',

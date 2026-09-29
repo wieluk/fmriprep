@@ -62,6 +62,29 @@ def _expand(value, n):
     return [value] * n
 
 
+def get_coreg_intermediate(bold_file: str, layout) -> str | None:
+    """Return a T1w (else T2w) from the same session as ``bold_file``, or ``None``."""
+    entities = layout.parse_file_entities(bold_file)
+    session = entities.get('session')
+    if session is None:
+        return None
+
+    for suffix in ('T1w', 'T2w'):
+        candidates = sorted(
+            layout.get(
+                return_type='file',
+                subject=entities['subject'],
+                session=session,
+                datatype='anat',
+                suffix=suffix,
+                extension=['.nii', '.nii.gz'],
+            )
+        )
+        if candidates:
+            return candidates[0]
+    return None
+
+
 def init_bold_anat_coreg_wf(
     *,
     bold_files: list[str],
@@ -76,6 +99,7 @@ def init_bold_anat_coreg_wf(
     output_dir: str,
     reference_anat: str,
     precomputed: dict | None = None,
+    intermediates: list[str | None] | None = None,
     mri_coreg_args: str | None = None,
     bbregister_args: str | None = None,
     name: str = 'bold_anat_coreg_wf',
@@ -116,6 +140,9 @@ def init_bold_anat_coreg_wf(
             alongside a complete set of ``run2template_xfms``, it is reused directly
             instead of reconstructing the reference from run 0. The template brain
             mask is always derived from the run references.
+    intermediates
+        Per-run same-session anatomical images (or ``None``) used to initialize
+        coregistration (see :py:func:`~fmriprep.workflows.bold.registration.init_bbreg_wf`).
     mri_coreg_args
         Extra arguments for FreeSurfer's ``mri_coreg``.
     bbregister_args
@@ -168,6 +195,7 @@ def init_bold_anat_coreg_wf(
         output_dir=output_dir,
         reference_anat=reference_anat,
         precomputed=precomputed,
+        intermediates=intermediates,
         mri_coreg_args=mri_coreg_args,
         bbregister_args=bbregister_args,
         name=name,
@@ -188,6 +216,7 @@ def init_bold_run_coreg_wf(
     output_dir: str,
     reference_anat: str,
     precomputed: dict | None = None,
+    intermediates: list[str | None] | None = None,
     mri_coreg_args: str | None = None,
     bbregister_args: str | None = None,
     name: str = 'bold_run_coreg_wf',
@@ -212,6 +241,7 @@ def init_bold_run_coreg_wf(
     outputnode = pe.Node(niu.IdentityInterface(fields=OUTPUT_FIELDS), name='outputnode')
 
     template2anat_xfm = precomputed.get('template2anat_xfm') or [None] * n_runs
+    intermediates = intermediates or [None] * n_runs
     outputnode.inputs.run2template_xfms = [Undefined] * n_runs
 
     merge_template2anat = pe.Node(
@@ -241,9 +271,12 @@ def init_bold_run_coreg_wf(
             omp_nthreads=omp_nthreads,
             mem_gb=mem_gb,
             sloppy=sloppy,
+            use_intermediate=bool(intermediates[i]),
             mri_coreg_args=mri_coreg_args,
             bbregister_args=bbregister_args,
         )
+        if intermediates[i]:
+            reg_wf.inputs.inputnode.intermediate = intermediates[i]
         ds_template2anat_wf = init_ds_registration_wf(
             bids_root=bids_root,
             source_file=bold_file,
@@ -294,6 +327,7 @@ def init_bold_template_coreg_wf(
     output_dir: str,
     reference_anat: str,
     precomputed: dict | None = None,
+    intermediates: list[str | None] | None = None,
     mri_coreg_args: str | None = None,
     bbregister_args: str | None = None,
     name: str = 'bold_template_coreg_wf',
@@ -485,6 +519,16 @@ def init_bold_template_coreg_wf(
 
     if not template2anat_xfm:
         logger.info('Registering BOLD template to anatomical.')
+        # A template can only use an intermediate that all of its runs share
+        intermediate = None
+        if intermediates and any(intermediates):
+            if len(set(intermediates)) == 1:
+                intermediate = intermediates[0]
+            else:
+                logger.warning(
+                    f'Runs of this {coreg_space} template have different intermediates; '
+                    'not using an intermediate.'
+                )
         boldref_reg_wf = init_bold_reg_wf(
             name='boldref_reg_wf',
             bold2anat_dof=bold2anat_dof,
@@ -494,9 +538,12 @@ def init_bold_template_coreg_wf(
             omp_nthreads=omp_nthreads,
             mem_gb=mem_gb,
             sloppy=sloppy,
+            use_intermediate=intermediate is not None,
             mri_coreg_args=mri_coreg_args,
             bbregister_args=bbregister_args,
         )
+        if intermediate is not None:
+            boldref_reg_wf.inputs.inputnode.intermediate = intermediate
 
         # Single template->anat transform is written
         ds_template2anat_wf = init_ds_registration_wf(

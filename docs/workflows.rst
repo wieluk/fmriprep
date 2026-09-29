@@ -505,6 +505,11 @@ of each run and the reconstructed subject using the gray/white matter boundary
 (FreeSurfer's ``?h.white`` surfaces) is calculated by the ``bbregister`` routine.
 See :func:`fmriprep.workflows.bold.registration.init_bbreg_wf` for further details.
 
+For partial :abbr:`FoV (field-of-view)` BOLD, ``mri_coreg`` may fail to initialize
+the registration. ``--bold2anat-intermediate session`` instead registers a whole-head
+anatomical image from the same session to the anatomical reference, and maps the BOLD
+onto it through the image headers (as ``bbregister --int`` does).
+
 .. figure:: _static/EPIT1Normalization.svg
 
     Animation showing :abbr:`EPI (echo-planar imaging)` to T1w registration (FreeSurfer ``bbregister``)
