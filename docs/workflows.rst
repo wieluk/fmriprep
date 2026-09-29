@@ -510,6 +510,10 @@ the registration. ``--bold2anat-intermediate session`` instead registers a whole
 anatomical image from the same session to the anatomical reference, and maps the BOLD
 onto it through the image headers (as ``bbregister --int`` does).
 
+If sessions differ substantially in head position, ``fmriprep-prealign`` can be run
+first: it registers each session's T1w to a reference session and writes a copy of the
+dataset with the headers of all images of each session updated accordingly.
+
 .. figure:: _static/EPIT1Normalization.svg
 
     Animation showing :abbr:`EPI (echo-planar imaging)` to T1w registration (FreeSurfer ``bbregister``)
