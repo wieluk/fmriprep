@@ -76,6 +76,8 @@ def init_bold_anat_coreg_wf(
     output_dir: str,
     reference_anat: str,
     precomputed: dict | None = None,
+    mri_coreg_args: str | None = None,
+    bbregister_args: str | None = None,
     name: str = 'bold_anat_coreg_wf',
 ) -> Workflow:
     """
@@ -114,6 +116,10 @@ def init_bold_anat_coreg_wf(
             alongside a complete set of ``run2template_xfms``, it is reused directly
             instead of reconstructing the reference from run 0. The template brain
             mask is always derived from the run references.
+    mri_coreg_args
+        Extra arguments for FreeSurfer's ``mri_coreg``.
+    bbregister_args
+        Extra arguments for FreeSurfer's ``bbregister``.
 
     Inputs
     ------
@@ -162,6 +168,8 @@ def init_bold_anat_coreg_wf(
         output_dir=output_dir,
         reference_anat=reference_anat,
         precomputed=precomputed,
+        mri_coreg_args=mri_coreg_args,
+        bbregister_args=bbregister_args,
         name=name,
     )
 
@@ -180,6 +188,8 @@ def init_bold_run_coreg_wf(
     output_dir: str,
     reference_anat: str,
     precomputed: dict | None = None,
+    mri_coreg_args: str | None = None,
+    bbregister_args: str | None = None,
     name: str = 'bold_run_coreg_wf',
 ) -> Workflow:
     """Register each BOLD run reference to the anatomical independently.
@@ -231,6 +241,8 @@ def init_bold_run_coreg_wf(
             omp_nthreads=omp_nthreads,
             mem_gb=mem_gb,
             sloppy=sloppy,
+            mri_coreg_args=mri_coreg_args,
+            bbregister_args=bbregister_args,
         )
         ds_template2anat_wf = init_ds_registration_wf(
             bids_root=bids_root,
@@ -282,6 +294,8 @@ def init_bold_template_coreg_wf(
     output_dir: str,
     reference_anat: str,
     precomputed: dict | None = None,
+    mri_coreg_args: str | None = None,
+    bbregister_args: str | None = None,
     name: str = 'bold_template_coreg_wf',
 ) -> Workflow:
     """Coregister BOLD runs through a common template to the anatomical.
@@ -480,6 +494,8 @@ def init_bold_template_coreg_wf(
             omp_nthreads=omp_nthreads,
             mem_gb=mem_gb,
             sloppy=sloppy,
+            mri_coreg_args=mri_coreg_args,
+            bbregister_args=bbregister_args,
         )
 
         # Single template->anat transform is written

@@ -931,6 +931,8 @@ tasks and sessions), the following preprocessing was performed.
             output_dir=fmriprep_dir,
             reference_anat='T1w',
             precomputed=coreg_precomputed,
+            mri_coreg_args=config.workflow.bold2anat_mri_coreg_args,
+            bbregister_args=config.workflow.bold2anat_bbregister_args,
             name=f'bold_anat_coreg_{group_id}_wf',
         )
 

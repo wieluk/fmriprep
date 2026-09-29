@@ -58,6 +58,8 @@ def init_bold_reg_wf(
     omp_nthreads: int,
     name: str = 'bold_reg_wf',
     sloppy: bool = False,
+    mri_coreg_args: str | None = None,
+    bbregister_args: str | None = None,
 ):
     """
     Build a workflow to run same-subject, BOLD-to-T1w image-registration.
@@ -102,6 +104,10 @@ def init_bold_reg_wf(
         Maximum number of threads an individual process may use
     name : :obj:`str`
         Name of workflow (default: ``bold_reg_wf``)
+    mri_coreg_args : :obj:`str` or None
+        Extra arguments for FreeSurfer's ``mri_coreg``
+    bbregister_args : :obj:`str` or None
+        Extra arguments for FreeSurfer's ``bbregister``
 
     Inputs
     ------
@@ -166,14 +172,19 @@ def init_bold_reg_wf(
             bold2anat_dof=bold2anat_dof,
             bold2anat_init=bold2anat_init,
             omp_nthreads=omp_nthreads,
+            mri_coreg_args=mri_coreg_args,
+            bbregister_args=bbregister_args,
         )
     else:
+        if bbregister_args:
+            LOGGER.warning('FreeSurfer is disabled; ignoring custom bbregister arguments.')
         bbr_wf = init_fsl_bbr_wf(
             use_bbr=use_bbr,
             bold2anat_dof=bold2anat_dof,
             bold2anat_init=bold2anat_init,
             sloppy=sloppy,
             omp_nthreads=omp_nthreads,
+            mri_coreg_args=mri_coreg_args,
         )
 
     workflow.connect([
@@ -203,6 +214,8 @@ def init_bbreg_wf(
     bold2anat_init: RegistrationInit,
     omp_nthreads: int,
     name: str = 'bbreg_wf',
+    mri_coreg_args: str | None = None,
+    bbregister_args: str | None = None,
 ):
     """
     Build a workflow to run FreeSurfer's ``bbregister``.
@@ -245,6 +258,10 @@ def init_bbreg_wf(
         If ``'t2w'``, align BOLD to T1w using the T2w as an intermediate.
     name : :obj:`str`, optional
         Workflow name (default: bbreg_wf)
+    mri_coreg_args : :obj:`str` or None
+        Extra arguments for FreeSurfer's ``mri_coreg``
+    bbregister_args : :obj:`str` or None
+        Extra arguments for FreeSurfer's ``bbregister``
 
     Inputs
     ------
@@ -338,6 +355,8 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     )
     if use_t2w:
         mri_coreg.inputs.reference_mask = False
+    if mri_coreg_args:
+        mri_coreg.inputs.args = mri_coreg_args
 
     bbregister = pe.Node(
         BBRegister(
@@ -352,6 +371,8 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
     )
     if bold2anat_init == 'header':
         bbregister.inputs.init = 'header'
+    if bbregister_args:
+        bbregister.inputs.args = bbregister_args
 
     transforms = pe.Node(niu.Merge(2), run_without_submitting=True, name='transforms')
     # In cases where Merge(2) only has `in1` or `in2` defined
@@ -468,6 +489,7 @@ def init_fsl_bbr_wf(
     omp_nthreads: int,
     sloppy: bool = False,
     name: str = 'fsl_bbr_wf',
+    mri_coreg_args: str | None = None,
 ):
     """
     Build a workflow to run FSL's ``flirt``.
@@ -510,6 +532,8 @@ def init_fsl_bbr_wf(
         If ``'t2w'``, align BOLD to T1w using the T2w as an intermediate.
     name : :obj:`str`, optional
         Workflow name (default: fsl_bbr_wf)
+    mri_coreg_args : :obj:`str` or None
+        Extra arguments for FreeSurfer's ``mri_coreg``
 
     Inputs
     ------
@@ -603,6 +627,8 @@ Co-registration was configured with {dof_text} degrees of freedom{reason_text}.
         n_procs=omp_nthreads,
         mem_gb=5,
     )
+    if mri_coreg_args:
+        mri_coreg.inputs.args = mri_coreg_args
 
     xfm2itk = pe.Node(
         ConvertAffine(in_fmt='fsl', out_fmt='itk', inverse=True),

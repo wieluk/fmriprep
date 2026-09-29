@@ -519,6 +519,10 @@ transform will be compared to the initial transform found by FLIRT.
 Excessive deviation will result in rejecting the BBR refinement and accepting the
 original, affine registration.
 
+``--bold2anat-mri-coreg-args`` and ``--bold2anat-bbregister-args`` pass extra
+arguments to ``mri_coreg`` and ``bbregister``
+(e.g., ``--bold2anat-bbregister-args="--lh-only"``).
+
 Resampling BOLD runs onto standard spaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 :py:func:`~fmriprep.workflows.bold.apply.init_bold_volumetric_resample_wf`

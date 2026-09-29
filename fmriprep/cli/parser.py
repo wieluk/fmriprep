@@ -427,6 +427,18 @@ https://fmriprep.readthedocs.io/en/{currentv.base_version if is_release else 'la
         '6 degrees (rotation and translation) are used by default.',
     )
     g_conf.add_argument(
+        '--bold2anat-mri-coreg-args',
+        action='store',
+        default=None,
+        help='Extra arguments for FreeSurfer `mri_coreg` (e.g., "--no-cras0 --no-bf").',
+    )
+    g_conf.add_argument(
+        '--bold2anat-bbregister-args',
+        action='store',
+        default=None,
+        help='Extra arguments for FreeSurfer `bbregister` (e.g., "--lh-only").',
+    )
+    g_conf.add_argument(
         '--bold-coreg-level',
         action='store',
         choices=('run', 'session', 'subject'),
